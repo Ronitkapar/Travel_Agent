@@ -143,7 +143,8 @@ rabbitmq-data/
 
 # ActiveMQ
 activemq-data/
-
+AGENTS.md
+demo.excalidraw
 # SageMath parsed files
 *.sage.py
 
@@ -216,3 +217,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-specific
+.env.local
+*.log
+build/
+dist/
+src/*.egg-info/
+
+# Logfire local credentials/telemetry cache
+.logfire/

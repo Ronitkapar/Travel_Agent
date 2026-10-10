@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: tripmate-ai
+    runtime: python
+    plan: free
+    region: oregon
+    # uv backs the AviationStack MCP server, which the flight agent launches via
+    # `uvx`. Without it that one agent degrades to an "unavailable" message.
+    buildCommand: pip install uv && pip install -r requirements.txt
+    startCommand: uvicorn tripmate.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: AVIATION_STACK_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      # Required. Without it the app starts with threads in memory only, and any
+      # draft waiting for approval is lost on sleep, restart, or deploy.
+      # Use the Supabase IPv4 connection pooler; the direct db.<ref> host has no
+      # A record on IPv6-only projects and will not resolve from Render.
+      # - key: DATABASE_URL
+      #   sync: false
+      # Optional. Tracing stays off when unset.
+      # - key: LOGFIRE_TOKEN
+      #   sync: false
+      # - key: LOGFIRE_ENVIRONMENT
+      #   value: production
+      # - key: CORS_ORIGINS
+      #   value: https://your-frontend.vercel.app

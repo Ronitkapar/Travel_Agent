@@ -1,0 +1,2 @@
+# Local development: runtime + test tooling.
+-e .[dev]

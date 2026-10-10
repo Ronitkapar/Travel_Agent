@@ -1,7 +1,31 @@
-# Environments
+# Version control and CI
+.git
+.github
+.gitignore
+
+# Local environments and secrets
 .venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+venv
+env
+.env
+.env.*
+!.env.example
+
+# Python caches
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+
+# Tests and docs are not needed to serve the API
+tests
+demo.excalidraw
+render.yaml
+Dockerfile
+.dockerignore
+requirements-dev.txt
+
+# Logfire local credentials
+.logfire/
