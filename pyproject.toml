@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Ronitkapar/TravelAgent"
+Repository = "https://github.com/Ronitkapar/Travel_Agent"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
