@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/entbappy/Multi-Agent-System-using-LangGraph-MCP-Supervisor-Guardrails-HITL"
+Repository = "https://github.com/Ronitkapar/TravelAgent"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
