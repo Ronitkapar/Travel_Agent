@@ -19,18 +19,23 @@ from tripmate.services import travel as travel_service
 
 
 class FakeResponse:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, finish_reason: str = "stop") -> None:
         self.content = content
+        self.response_metadata = {"finish_reason": finish_reason}
 
 
 class FakeChatModel:
     """Returns canned replies chosen by a marker found in the system prompt."""
 
     def __init__(
-        self, replies: dict[str, str] | None = None, default: str = "ok"
+        self,
+        replies: dict[str, str] | None = None,
+        default: str = "ok",
+        finish_reason: str = "stop",
     ) -> None:
         self.replies = replies or {}
         self.default = default
+        self.finish_reason = finish_reason
         self.calls: list[tuple[str, str]] = []
 
     async def ainvoke(self, messages: Any) -> FakeResponse:
@@ -39,9 +44,9 @@ class FakeChatModel:
 
         for marker, reply in self.replies.items():
             if marker in system:
-                return FakeResponse(reply)
+                return FakeResponse(reply, self.finish_reason)
 
-        return FakeResponse(self.default)
+        return FakeResponse(self.default, self.finish_reason)
 
 
 ALLOW_JSON = json.dumps({"allowed": True, "reason": ""})

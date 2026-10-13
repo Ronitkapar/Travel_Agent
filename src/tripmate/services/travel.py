@@ -11,6 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from ..config import Settings, get_settings
+from ..graph.routing import AGENT_ORDER
 from ..graph.state import initial_state
 from ..graph.workflow import build_graph
 from ..logging_config import get_logger
@@ -20,6 +21,16 @@ from .checkpointer import CheckpointerHandle, create_checkpointer
 logger = get_logger(__name__)
 
 THREAD_ID_PREFIX = "user_"
+
+# LangGraph's default cap is 25 supersteps. A full run costs one step per
+# specialist plus supervisor, itinerary, approval and final, so a few revision
+# rounds overflow it. The budget scales with the revision cap, which is the
+# real bound on the loop.
+RECURSION_SLACK = 10
+
+
+def recursion_limit(max_revisions: int) -> int:
+    return len(AGENT_ORDER) + 2 * (max_revisions + 1) + RECURSION_SLACK
 
 
 class ThreadNotFoundError(RuntimeError):
@@ -40,7 +51,9 @@ def _interrupt_payload(result: dict[str, Any]) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else {"value": payload}
 
 
-def serialize_result(result: dict[str, Any], thread_id: str) -> dict[str, Any]:
+def serialize_result(
+    result: dict[str, Any], thread_id: str, max_revisions: int | None = None
+) -> dict[str, Any]:
     """Flatten a graph result into the API response contract."""
 
     interrupt_payload = _interrupt_payload(result)
@@ -73,6 +86,8 @@ def serialize_result(result: dict[str, Any], thread_id: str) -> dict[str, Any]:
         "guardrail_reason": result.get("guardrail_reason", ""),
         "approved": result.get("approved"),
         "human_feedback": result.get("human_feedback", ""),
+        "revision_count": result.get("revision_count", 0),
+        "max_revisions": max_revisions,
         "llm_calls": result.get("llm_calls", 0),
     }
 
@@ -131,6 +146,12 @@ class TravelPlanner:
     def _config(thread_id: str) -> dict[str, dict[str, Any]]:
         return {"configurable": {"thread_id": thread_id}}
 
+    def _config_with_limit(self, thread_id: str) -> dict[str, dict[str, Any]]:
+        return {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": recursion_limit(self._settings.max_revisions),
+        }
+
     async def start_run(
         self, user_input: str, thread_id: str | None = None
     ) -> dict[str, Any]:
@@ -148,9 +169,11 @@ class TravelPlanner:
             thread_id=thread_id,
             phase="start",
         ):
-            result = await self.graph.ainvoke(state, config=self._config(thread_id))
+            result = await self.graph.ainvoke(
+                state, config=self._config_with_limit(thread_id)
+            )
 
-        return serialize_result(result, thread_id)
+        return serialize_result(result, thread_id, self._settings.max_revisions)
 
     async def resume_run(
         self, thread_id: str, approved: bool, feedback: str = ""
@@ -180,10 +203,10 @@ class TravelPlanner:
         ):
             result = await self.graph.ainvoke(
                 Command(resume={"approved": approved, "feedback": feedback.strip()}),
-                config=self._config(thread_id),
+                config=self._config_with_limit(thread_id),
             )
 
-        return serialize_result(result, thread_id)
+        return serialize_result(result, thread_id, self._settings.max_revisions)
 
     async def _thread_exists(self, thread_id: str) -> bool:
         """True when the thread has a checkpoint saved on this backend."""

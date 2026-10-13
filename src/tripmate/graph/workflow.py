@@ -22,8 +22,11 @@ from ..agents import (
 from .routing import (
     AGENT_ORDER,
     GUARDRAIL_BLOCKED,
+    REVIEW_ROUTES,
     ROUTE_MAP,
     route_after_agent,
+    route_after_approval,
+    route_after_final,
     route_from_supervisor,
 )
 from .state import TravelState
@@ -31,6 +34,7 @@ from .state import TravelState
 SUPERVISOR = "supervisor"
 FINAL_AGENT = "final_agent"
 ITINERARY = "itinerary_agent"
+APPROVAL = "human_approval"
 
 # Specialists that chain into the next selected agent, in execution order.
 # itinerary_agent is excluded: it has a fixed edge to the approval node.
@@ -48,7 +52,7 @@ def build_graph() -> StateGraph:
     builder.add_node(SUPERVISOR, supervisor_node)
     builder.add_node(GUARDRAIL_BLOCKED, guardrail_blocked_node)
     builder.add_node(ITINERARY, itinerary_agent)
-    builder.add_node("human_approval", human_approval_node)
+    builder.add_node(APPROVAL, human_approval_node)
     builder.add_node(FINAL_AGENT, final_agent)
 
     for agent, node in CHAINED_SPECIALISTS.items():
@@ -64,9 +68,13 @@ def build_graph() -> StateGraph:
             agent, route_after_agent(agent), ROUTE_MAP
         )
 
-    builder.add_edge(ITINERARY, "human_approval")
-    builder.add_edge("human_approval", FINAL_AGENT)
-    builder.add_edge(FINAL_AGENT, END)
+    builder.add_edge(ITINERARY, APPROVAL)
+
+    # The review loop: approval either ends the run or hands off to the final
+    # agent, and the final agent either finishes or returns to review so the
+    # reviewer can keep giving feedback until they are satisfied.
+    builder.add_conditional_edges(APPROVAL, route_after_approval, REVIEW_ROUTES)
+    builder.add_conditional_edges(FINAL_AGENT, route_after_final, REVIEW_ROUTES)
     builder.add_edge(GUARDRAIL_BLOCKED, END)
 
     return builder
@@ -78,7 +86,7 @@ def node_names() -> tuple[str, ...]:
         GUARDRAIL_BLOCKED,
         *CHAINED_SPECIALISTS,
         ITINERARY,
-        "human_approval",
+        APPROVAL,
         FINAL_AGENT,
     )
 

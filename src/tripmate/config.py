@@ -26,6 +26,16 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/"
 AVATIONSTACK_MCP_PACKAGE = "aviationstack-mcp"
 
+# Groq leaves max_tokens unset by default, which caps replies at 3072 completion
+# tokens. The itinerary and final-response agents exceed that on a long trip, so
+# the cap is set explicitly. Override with LLM_MAX_TOKENS.
+DEFAULT_MAX_COMPLETION_TOKENS = 8_192
+
+# Upper bound on human feedback rounds before a plan is finalized anyway. The
+# review loop is otherwise unbounded and would exhaust the graph recursion
+# limit. Override with MAX_REVISIONS.
+DEFAULT_MAX_REVISIONS = 5
+
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent.parent
 
@@ -139,6 +149,22 @@ def _normalize_database_url(raw: str | None) -> str | None:
     return url
 
 
+def _positive_int(raw: str | None, default: int) -> int:
+    """Parse a positive integer, falling back to ``default`` on bad input.
+
+    A malformed value must not stop the app from booting, so the default is
+    used instead of letting the conversion error escape.
+    """
+
+    try:
+        value = int(raw) if raw and raw.strip() else default
+    except ValueError:
+        logger.warning("Ignoring malformed integer value %r; using %s.", raw, default)
+        return default
+
+    return value if value > 0 else default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     groq_api_key: str | None = None
@@ -153,6 +179,8 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+    max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
+    max_revisions: int = DEFAULT_MAX_REVISIONS
 
     cors_origins: tuple[str, ...] = field(default_factory=tuple)
     weather_server_path: Path = PACKAGE_ROOT / "mcp" / "weather_server.py"
@@ -217,8 +245,12 @@ def settings_from_env(environ: dict[str, str] | None = None) -> Settings:
         logfire_environment=env.get("LOGFIRE_ENVIRONMENT") or "local",
         model=env.get("GROQ_MODEL") or DEFAULT_MODEL,
         host=env.get("HOST") or "0.0.0.0",
-        port=int(env.get("PORT") or 8000),
+        port=_positive_int(env.get("PORT"), 8000),
         log_level=(env.get("LOG_LEVEL") or "info").lower(),
+        max_completion_tokens=_positive_int(
+            env.get("LLM_MAX_TOKENS"), DEFAULT_MAX_COMPLETION_TOKENS
+        ),
+        max_revisions=_positive_int(env.get("MAX_REVISIONS"), DEFAULT_MAX_REVISIONS),
         cors_origins=_split_origins(
             env.get("CORS_ORIGINS")
             or "http://localhost:5173,http://localhost:3000"

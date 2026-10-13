@@ -44,6 +44,8 @@ class TravelResponse(BaseModel):
     guardrail_reason: str = ""
     approved: bool | None = None
     human_feedback: str = ""
+    revision_count: int = 0
+    max_revisions: int | None = None
     llm_calls: int = 0
 
 

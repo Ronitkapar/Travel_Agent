@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from langgraph.graph import END
+
+from ..config import get_settings
 from .state import TravelState
 
 # Canonical execution order. The itinerary agent is always last because it
@@ -19,10 +22,22 @@ KNOWN_AGENTS = frozenset(AGENT_ORDER)
 
 GUARDRAIL_BLOCKED = "guardrail_blocked"
 ITINERARY = "itinerary_agent"
+HUMAN_APPROVAL = "human_approval"
+FINAL_AGENT = "final_agent"
+END_NODE = END
 
 ROUTE_MAP = {
     GUARDRAIL_BLOCKED: GUARDRAIL_BLOCKED,
     **{agent: agent for agent in AGENT_ORDER},
+}
+
+# Conditional targets for the review loop. Like ROUTE_MAP, this maps each
+# destination onto itself; the keys must therefore be exactly the values the
+# review routers return, END included.
+REVIEW_ROUTES = {
+    HUMAN_APPROVAL: HUMAN_APPROVAL,
+    FINAL_AGENT: FINAL_AGENT,
+    END_NODE: END_NODE,
 }
 
 
@@ -66,3 +81,35 @@ def route_after_agent(current_agent: str) -> Callable[[TravelState], str]:
         return ITINERARY
 
     return route
+
+
+def route_after_approval(state: TravelState) -> str:
+    """Decide what happens once the reviewer has answered.
+
+    Approval on a plan that was never revised still needs the final agent to
+    polish the draft. Approval on an already-revised plan is finished: the
+    reviewer has seen that exact text. Feedback always routes through the final
+    agent so the revision is regenerated before the next interruption.
+    """
+
+    if state.get("approved", False):
+        return END_NODE if state.get("revision_count", 0) else FINAL_AGENT
+
+    return FINAL_AGENT
+
+
+def route_after_final(state: TravelState) -> str:
+    """Return to review, or finish once the reviewer is satisfied.
+
+    ``MAX_REVISIONS`` bounds the loop so a user who keeps asking for changes
+    cannot exhaust the graph recursion limit; past the cap the plan is finalized
+    on the last revision.
+    """
+
+    if state.get("approved", False):
+        return END_NODE
+
+    if state.get("revision_count", 0) >= get_settings().max_revisions:
+        return END_NODE
+
+    return HUMAN_APPROVAL

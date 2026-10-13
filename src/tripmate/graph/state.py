@@ -29,6 +29,7 @@ class TravelState(TypedDict, total=False):
     human_feedback: str
     final_response: str
 
+    revision_count: int
     llm_calls: int
 
 
@@ -63,5 +64,6 @@ def initial_state(user_query: str) -> TravelState:
         approved=False,
         human_feedback="",
         final_response="",
+        revision_count=0,
         llm_calls=0,
     )

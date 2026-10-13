@@ -35,15 +35,21 @@ POST /api/travel
   flight ─► hotel ─► weather ─► budget        (each conditional on selection)
       │
       ▼
-  itinerary_agent  ──► draft
-      │
-      ▼
+itinerary_agent  ──► draft
+       │
+       ▼
   human_approval   ──► interrupt() ──► SUSPENDED
-      │
-      │  POST /api/travel/approve
-      ▼
-  final_agent      ──► approved plan
+       │                                      │
+       │  POST /api/travel/approve           │ feedback
+       │                                      │
+       └──────────────► final_agent ◄─────────┘
+                          │        │
+             approved     │        │ approved
+                          ▼        ▼
+                          END    (back to human_approval)
 ```
+
+Review is a loop: requesting changes regenerates the plan and suspends again, so the reviewer can keep refining until they approve.
 
 ### Graph topology
 
@@ -57,8 +63,11 @@ START → supervisor ─┬─(blocked)──► guardrail_blocked → END
                                                    ▼
                                         itinerary_agent → human_approval
                                                                       │
-                                                                      ▼
-                                                                final_agent → END
+                            ┌─────────────────────────────────────────┘
+                            ▼
+                      final_agent ──(revise)──► human_approval   (loops)
+                            │
+                            └─(approved)──► END
 ```
 
 `human_approval` calls LangGraph's `interrupt()`. The graph suspends and checkpoints its state under the request's `thread_id`. An approval request resumes that same thread with `Command(resume={...})`.
@@ -85,6 +94,14 @@ Approval is a real suspension, not a UI affordance. The graph stops mid-executio
 
 - **With `DATABASE_URL`** — Postgres via `AsyncPostgresSaver`. A draft waiting for approval survives a cold start, restart, or redeploy.
 - **Without it** — in-memory state. A pending approval is lost whenever the process restarts.
+
+Review is a loop, not a single gate. Requesting changes regenerates the plan and interrupts again, so the reviewer can keep refining until they approve. Each round increments `revision_count`, and the revised text becomes the new draft under review:
+
+```
+itinerary_agent → human_approval ⇄ final_agent → END
+```
+
+Approving a plan that was never revised still runs the final agent to polish the draft. Approving an already-revised plan finishes immediately, because the reviewer has seen that exact text. `MAX_REVISIONS` (default 5) bounds the loop; past the cap the last revision is finalized.
 
 ---
 
@@ -120,7 +137,9 @@ Runs the graph and returns the draft with `requires_approval: true`. Omit `threa
 { "thread_id": "user_…", "approved": true, "feedback": "" }
 ```
 
-Resumes the suspended thread. When `approved` is `false`, `feedback` is required (`400` otherwise). Returns the final plan with `requires_approval: false`.
+Resumes the suspended thread. When `approved` is `false`, `feedback` is required (`400` otherwise).
+
+Requesting changes regenerates the plan and suspends again with `requires_approval: true` and the incremented `revision_count`, so the same endpoint drives every review round. When `approved` is `true` the run finishes with `requires_approval: false`.
 
 ### `GET /health`
 
@@ -184,6 +203,9 @@ uvicorn tripmate.main:app --reload
 | Variable | Required | Purpose |
 |---|---|---|
 | `GROQ_API_KEY` | yes | LLM access for every agent |
+| `GROQ_MODEL` | no | Model id override |
+| `LLM_MAX_TOKENS` | no | Per-reply completion ceiling (default `8192`) |
+| `MAX_REVISIONS` | no | Cap on human feedback rounds (default `5`) |
 | `TAVILY_API_KEY` | for search | Hotel and web search |
 | `AVIATION_STACK_API_KEY` | for flights | Airport, airline and flight data |
 | `OPENWEATHER_API_KEY` | for weather | Weather MCP server |

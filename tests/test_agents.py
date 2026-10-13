@@ -180,3 +180,68 @@ async def test_agent_prompts_stay_within_the_groq_token_ceiling(
     state["approved"] = True
     await final_agent(state)
     assert len(captured["prompt"]) < 20_000
+
+
+async def test_completion_limit_is_set_on_the_chat_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Groq defaults max_tokens to 3072 when unset.
+
+    Left unset, a long itinerary is cut off mid-sentence and returned as a normal
+    success response, so the ceiling has to be raised explicitly.
+    """
+
+    from tripmate.config import DEFAULT_MAX_COMPLETION_TOKENS, get_settings
+    from tripmate.services import llm as module
+
+    model = module._build_chat_model()
+
+    assert model.max_tokens == DEFAULT_MAX_COMPLETION_TOKENS
+    assert model.max_tokens > 3072
+    assert get_settings().max_completion_tokens == model.max_tokens
+
+
+async def test_a_length_truncated_reply_is_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reply the provider cut short must not be passed off as complete."""
+
+    from tripmate.services import llm as module
+
+    model = FakeChatModel(default="1. **Stay hydra", finish_reason="length")
+    monkeypatch.setattr(module, "get_chat_model", lambda: model)
+
+    reply = await module.chat("system", "user")
+
+    assert reply.startswith("1. **Stay hydra")
+    assert module.TRUNCATION_NOTICE.strip() in reply
+
+
+async def test_a_complete_reply_is_left_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tripmate.services import llm as module
+
+    model = FakeChatModel(default="1. Stay hydrated.", finish_reason="stop")
+    monkeypatch.setattr(module, "get_chat_model", lambda: model)
+
+    assert await module.chat("system", "user") == "1. Stay hydrated."
+
+
+async def test_a_reply_without_metadata_is_returned_as_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Older providers and stubs may omit response_metadata entirely."""
+
+    from tripmate.services import llm as module
+
+    class Bare:
+        content = "plain reply"
+
+    class BareModel:
+        async def ainvoke(self, messages):
+            return Bare()
+
+    monkeypatch.setattr(module, "get_chat_model", lambda: BareModel())
+
+    assert await module.chat("system", "user") == "plain reply"

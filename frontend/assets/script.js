@@ -93,7 +93,7 @@ function showWorkflow(data) {
   section.classList.remove("hidden");
 }
 
-function showResult(answer, threadId, isDraft = false) {
+function showResult(answer, threadId, isDraft = false, revisionCount = 0) {
   latestAnswerMarkdown = answer || "";
 
   const resultSection = document.getElementById("resultSection");
@@ -103,7 +103,11 @@ function showResult(answer, threadId, isDraft = false) {
 
   renderMarkdown(resultBox, latestAnswerMarkdown);
   threadInfo.textContent = `Thread ID: ${threadId}`;
-  resultTitle.textContent = isDraft ? "Draft Travel Plan" : "Your Final AI Travel Plan";
+  resultTitle.textContent = isDraft
+    ? (revisionCount > 0
+        ? `Revised Travel Plan (round ${revisionCount})`
+        : "Draft Travel Plan")
+    : "Your Final AI Travel Plan";
   resultSection.classList.remove("hidden");
 
   resultSection.scrollIntoView({
@@ -118,6 +122,10 @@ function showApproval(data) {
   const approvalRequest = document.getElementById("approvalRequest");
   approvalRequest.textContent = data.approval_request ||
     "Approve the draft or provide feedback before the final plan is generated.";
+
+  // Each interruption is a fresh review round, so stale feedback from the
+  // previous one is cleared rather than left to be resubmitted.
+  document.getElementById("approvalFeedback").value = "";
   section.classList.remove("hidden");
 }
 
@@ -227,8 +235,22 @@ async function submitApproval(approved) {
     }
 
     showWorkflow(data);
-    hideApproval();
-    showResult(data.answer, data.thread_id, false);
+
+    // The graph loops: rejecting with feedback interrupts again so the reviewer
+    // can keep refining until they approve. The panel must come back, and the
+    // answer shown is the latest revision.
+    if (data.requires_approval) {
+      showResult(
+        data.itinerary || data.answer,
+        data.thread_id,
+        true,
+        data.revision_count || 0
+      );
+      showApproval(data);
+    } else {
+      hideApproval();
+      showResult(data.answer, data.thread_id, false);
+    }
   } catch (error) {
     showError(error.message);
   } finally {

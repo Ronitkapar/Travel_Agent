@@ -25,6 +25,12 @@ logger = get_logger(__name__)
 # whole run with a 413.
 MAX_PROMPT_CHARS = 12_000
 
+TRUNCATION_NOTICE = (
+    "\n\n---\n\n"
+    "> **Output was cut short** — this reply reached the model's completion "
+    "limit and is incomplete. Ask for a shorter plan or raise `LLM_MAX_TOKENS`."
+)
+
 
 def truncate_for_prompt(value: object, limit: int = MAX_PROMPT_CHARS) -> str:
     """Clamp interpolated data to a bounded, prompt-safe length."""
@@ -37,7 +43,11 @@ def truncate_for_prompt(value: object, limit: int = MAX_PROMPT_CHARS) -> str:
 
 def _build_chat_model() -> ChatGroq:
     settings = get_settings()
-    return ChatGroq(model=settings.model, api_key=settings.require("GROQ_API_KEY"))
+    return ChatGroq(
+        model=settings.model,
+        api_key=settings.require("GROQ_API_KEY"),
+        max_tokens=settings.max_completion_tokens,
+    )
 
 
 # Held as a module-level name rather than looked up through ``get_chat_model``
@@ -56,7 +66,7 @@ def reset_chat_model() -> None:
 
 
 async def chat(system_prompt: str, user_prompt: str) -> str:
-    """Return the model's raw text reply."""
+    """Return the model's reply, flagging any provider-side truncation."""
 
     settings = get_settings()
 
@@ -71,7 +81,19 @@ async def chat(system_prompt: str, user_prompt: str) -> str:
             [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
         )
 
-    return str(response.content)
+    content = str(response.content)
+
+    # A length-truncated reply is indistinguishable from a complete one unless
+    # finish_reason is checked, so the cut is surfaced instead of shipped.
+    metadata = getattr(response, "response_metadata", None) or {}
+    if metadata.get("finish_reason") == "length":
+        logger.warning(
+            "LLM reply hit the completion limit (%s tokens) and was truncated.",
+            settings.max_completion_tokens,
+        )
+        content += TRUNCATION_NOTICE
+
+    return content
 
 
 def parse_json_object(text: str) -> dict[str, Any]:

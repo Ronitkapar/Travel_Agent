@@ -12,6 +12,11 @@ APPROVAL_REQUEST = (
     "final polished plan, or provide feedback for revision."
 )
 
+REVISION_APPROVAL_REQUEST = (
+    "Here is the revised plan. Approve it when you are satisfied, or describe "
+    "further changes."
+)
+
 
 async def itinerary_agent(state: TravelState) -> dict:
     prompt = f"""
@@ -62,6 +67,10 @@ async def final_agent(state: TravelState) -> dict:
         review_instruction = f"""
 The user requested a revision. Apply this feedback carefully:
 {feedback}
+
+Reply with the complete revised plan, not a diff. Preserve every section of the
+draft that the feedback does not ask you to change, so the user never loses
+content between rounds.
 """
 
     prompt = f"""
@@ -89,7 +98,7 @@ Budget Analysis:
 {truncate_for_prompt(state.get('budget_results', ''), 1200)}
 
 Draft Itinerary:
-{truncate_for_prompt(state.get('itinerary', ''), 2500)}
+{truncate_for_prompt(state.get('itinerary', ''), 6000)}
 
 Format the final answer beautifully using these sections:
 1. Trip Summary
@@ -114,8 +123,21 @@ Important:
         prompt,
     )
 
-    return {
+    revising = not state.get("approved", False)
+    revision_count = state.get("revision_count", 0) + (1 if revising else 0)
+
+    # On a revision the reply becomes the next draft under review, so the
+    # interrupt payload shows the reviewer exactly what they are judging. On the
+    # first approval the polished reply is only the final answer.
+    updates: dict = {
         "final_response": response,
         "messages": [AIMessage(content=response)],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
+
+    if revising:
+        updates["itinerary"] = response
+        updates["approval_request"] = REVISION_APPROVAL_REQUEST
+        updates["revision_count"] = revision_count
+
+    return updates
